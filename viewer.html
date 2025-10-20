@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GBP Ranking Map Viewer</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { margin: 0; padding: 0; font-family: system-ui, -apple-system, sans-serif; }
+        #map { height: 100%; width: 100%; }
+        .custom-marker { background: transparent; border: none; }
+    </style>
+</head>
+<body>
+    <div id="app" class="flex flex-col h-screen bg-gray-50">
+        <!-- Header -->
+        <div class="bg-white shadow-sm border-b px-6 py-4">
+            <h1 class="text-2xl font-bold text-gray-900">GBP Ranking Map Viewer</h1>
+            <p class="text-sm text-gray-600 mt-1" id="subtitle">Loading analysis...</p>
+        </div>
+
+        <div class="flex flex-1 overflow-hidden">
+            <!-- Sidebar -->
+            <div class="w-96 bg-white shadow-lg overflow-y-auto">
+                <div class="p-6 space-y-4">
+                    <div id="loading" class="text-center py-8">
+                        <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
+                        <p class="mt-4 text-gray-600">Loading analysis data...</p>
+                    </div>
+
+                    <div id="error" class="hidden bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-md text-sm"></div>
+
+                    <div id="metadata" class="hidden space-y-3">
+                        <div class="bg-gray-50 p-4 rounded-md">
+                            <h3 class="font-medium text-gray-900 mb-2">Analysis Details</h3>
+                            <div class="text-sm space-y-1">
+                                <div><span class="font-medium">Location:</span> <span id="meta-location"></span></div>
+                                <div><span class="font-medium">Keyword:</span> <span id="meta-keyword"></span></div>
+                                <div><span class="font-medium">Grid:</span> <span id="meta-grid"></span></div>
+                                <div><span class="font-medium">Created:</span> <span id="meta-created"></span></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div id="businessSelector" class="hidden space-y-3">
+                        <label class="block text-sm font-medium text-gray-700">
+                            Select Business (<span id="businessCount">0</span> found)
+                        </label>
+                        <select id="businessSelect" class="w-full px-3 py-2 border border-gray-300 rounded-md"></select>
+
+                        <div class="p-3 bg-gray-50 rounded-md">
+                            <h3 class="font-medium text-gray-900 mb-2">Ranking Legend</h3>
+                            <div class="space-y-1 text-sm">
+                                <div class="flex items-center gap-2">
+                                    <div class="w-4 h-4 rounded-full bg-green-500"></div>
+                                    <span>Rank 1-3</span>
+                                </div>
+                                <div class="flex items-center gap-2">
+                                    <div class="w-4 h-4 rounded-full bg-yellow-500"></div>
+                                    <span>Rank 4-10</span>
+                                </div>
+                                <div class="flex items-center gap-2">
+                                    <div class="w-4 h-4 rounded-full bg-orange-500"></div>
+                                    <span>Rank 11-20</span>
+                                </div>
+                                <div class="flex items-center gap-2">
+                                    <div class="w-4 h-4 rounded-full bg-gray-400"></div>
+                                    <span>Not ranked</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div id="businessInfo" class="p-3 bg-blue-50 rounded-md text-sm">
+                            <div><strong>Business:</strong> <span id="biz-name"></span></div>
+                            <div><strong>Address:</strong> <span id="biz-address"></span></div>
+                            <div><strong>Rating:</strong> <span id="biz-rating"></span></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Map -->
+            <div class="flex-1 relative">
+                <div id="map"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let map;
+        let markers = [];
+        let analysisData = null;
+        let selectedBusinessId = null;
+
+        // Get UUID from URL parameter
+        function getDataUUID() {
+            const params = new URLSearchParams(window.location.search);
+            return params.get('data');
+        }
+
+        // Load analysis data
+        async function loadAnalysis() {
+            const uuid = getDataUUID();
+            
+            if (!uuid) {
+                showError('No analysis ID specified. Please use a valid URL with ?data=UUID parameter.');
+                return;
+            }
+
+            try {
+                // Load from GitHub raw content
+                const url = `https://raw.githubusercontent.com/lvoigt1965/gbp-ranking-map/main/data/${uuid}.json`;
+                const response = await fetch(url);
+                
+                if (!response.ok) {
+                    throw new Error('Analysis not found');
+                }
+
+                analysisData = await response.json();
+                displayAnalysis();
+                
+            } catch (error) {
+                showError(`Failed to load analysis: ${error.message}`);
+            }
+        }
+
+        function showError(message) {
+            document.getElementById('loading').classList.add('hidden');
+            const errorEl = document.getElementById('error');
+            errorEl.textContent = message;
+            errorEl.classList.remove('hidden');
+        }
+
+        function displayAnalysis() {
+            document.getElementById('loading').classList.add('hidden');
+            
+            const meta = analysisData.metadata;
+            
+            // Update header
+            document.getElementById('subtitle').textContent = 
+                `${meta.keyword} near ${meta.center_lat.toFixed(4)}, ${meta.center_lon.toFixed(4)}`;
+            
+            // Show metadata
+            document.getElementById('meta-location').textContent = 
+                `${meta.center_lat.toFixed(6)}, ${meta.center_lon.toFixed(6)}`;
+            document.getElementById('meta-keyword').textContent = meta.keyword;
+            document.getElementById('meta-grid').textContent = 
+                `${meta.grid_rows}×${meta.grid_cols} (${meta.num_points} points, ${meta.distance_km}km spacing)`;
+            document.getElementById('meta-created').textContent = 
+                new Date(meta.created_at).toLocaleString();
+            document.getElementById('metadata').classList.remove('hidden');
+            
+            // Populate business selector
+            const businesses = analysisData.businesses;
+            const select = document.getElementById('businessSelect');
+            document.getElementById('businessCount').textContent = businesses.length;
+            
+            businesses.forEach(biz => {
+                const option = document.createElement('option');
+                option.value = biz.id;
+                option.textContent = `${biz.title}${biz.rating ? ` (${biz.rating}⭐)` : ''}`;
+                select.appendChild(option);
+            });
+            
+            if (businesses.length > 0) {
+                selectedBusinessId = businesses[0].id;
+                select.value = selectedBusinessId;
+                document.getElementById('businessSelector').classList.remove('hidden');
+                updateBusinessInfo();
+                updateMap();
+            }
+            
+            // Initialize map
+            map = L.map('map').setView([meta.center_lat, meta.center_lon], 12);
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+            }).addTo(map);
+            
+            // Setup event listener
+            select.addEventListener('change', (e) => {
+                selectedBusinessId = e.target.value;
+                updateBusinessInfo();
+                updateMap();
+            });
+            
+            // Initial map update
+            updateMap();
+        }
+
+        function updateBusinessInfo() {
+            const business = analysisData.businesses.find(b => b.id === selectedBusinessId);
+            if (business) {
+                document.getElementById('biz-name').textContent = business.title;
+                document.getElementById('biz-address').textContent = business.address || 'N/A';
+                document.getElementById('biz-rating').textContent = 
+                    business.rating ? `${business.rating} ⭐ (${business.reviews} reviews)` : 'N/A';
+            }
+        }
+
+        function updateMap() {
+            // Clear existing markers
+            markers.forEach(m => map.removeLayer(m));
+            markers = [];
+            
+            const rankings = analysisData.rankings[selectedBusinessId] || {};
+            
+            analysisData.grid_points.forEach(point => {
+                const position = rankings[point.id];
+                const color = getRankingColor(position);
+                const popup = `<strong>Position: ${position || 'Not ranked'}</strong><br>Lat: ${point.lat}<br>Lon: ${point.lon}`;
+                markers.push(createColoredMarker(point.lat, point.lon, color, popup));
+            });
+        }
+
+        function getRankingColor(position) {
+            if (!position || position > 20) return '#cccccc';
+            if (position <= 3) return '#22c55e';
+            if (position <= 10) return '#eab308';
+            if (position <= 20) return '#f97316';
+            return '#cccccc';
+        }
+
+        function createColoredMarker(lat, lon, color, popupText) {
+            const icon = L.divIcon({
+                className: 'custom-marker',
+                html: `<div style="background-color: ${color}; width: 25px; height: 25px; border-radius: 50%; border: 3px solid white; box-shadow: 0 2px 5px rgba(0,0,0,0.3);"></div>`,
+                iconSize: [25, 25],
+                iconAnchor: [12, 12]
+            });
+            const marker = L.marker([lat, lon], { icon }).addTo(map);
+            if (popupText) marker.bindPopup(popupText);
+            return marker;
+        }
+
+        // Initialize on load
+        window.addEventListener('load', loadAnalysis);
+    </script>
+</body>
+</html>
