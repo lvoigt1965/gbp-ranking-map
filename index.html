@@ -1,0 +1,441 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GBP Ranking Map Analyzer</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { margin: 0; padding: 0; font-family: system-ui, -apple-system, sans-serif; }
+        #map { height: 100%; width: 100%; }
+        .custom-marker { background: transparent; border: none; }
+    </style>
+</head>
+<body>
+    <div id="app" class="flex flex-col h-screen bg-gray-50">
+        <!-- Header -->
+        <div class="bg-white shadow-sm border-b px-6 py-4">
+            <h1 class="text-2xl font-bold text-gray-900">GBP Ranking Map Analyzer</h1>
+            <p class="text-sm text-gray-600 mt-1">Visualize Google Business Profile rankings across multiple locations</p>
+        </div>
+
+        <div class="flex flex-1 overflow-hidden">
+            <!-- Sidebar -->
+            <div class="w-96 bg-white shadow-lg overflow-y-auto">
+                <div class="p-6 space-y-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Center Latitude</label>
+                        <input type="number" step="0.000001" id="centerLat" class="w-full px-3 py-2 border border-gray-300 rounded-md">
+                    </div>
+
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Center Longitude</label>
+                        <input type="number" step="0.000001" id="centerLon" class="w-full px-3 py-2 border border-gray-300 rounded-md">
+                    </div>
+
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Keyword</label>
+                        <input type="text" id="keyword" class="w-full px-3 py-2 border border-gray-300 rounded-md">
+                    </div>
+
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Number of Points</label>
+                        <input type="number" min="1" id="numPoints" class="w-full px-3 py-2 border border-gray-300 rounded-md">
+                        <p class="text-xs text-gray-500 mt-1" id="gridInfo"></p>
+                    </div>
+
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Distance Between Points (km)</label>
+                        <input type="number" step="0.1" min="0.1" id="distanceKm" class="w-full px-3 py-2 border border-gray-300 rounded-md">
+                    </div>
+
+                    <div class="border-t pt-4">
+                        <label class="block text-sm font-medium text-gray-700 mb-1">DataForSEO API Login</label>
+                        <input type="text" id="apiLogin" class="w-full px-3 py-2 border border-gray-300 rounded-md">
+                    </div>
+
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">DataForSEO API Password</label>
+                        <input type="password" id="apiPassword" class="w-full px-3 py-2 border border-gray-300 rounded-md">
+                    </div>
+
+                    <div class="flex gap-2">
+                        <button id="runBtn" class="flex-1 bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700">
+                            Run Analysis
+                        </button>
+                        <button id="copyUrlBtn" class="px-4 py-2 border border-gray-300 rounded-md hover:bg-gray-50" title="Copy shareable URL">
+                            📋
+                        </button>
+                        <button id="resetBtn" class="px-4 py-2 border border-gray-300 rounded-md hover:bg-gray-50" title="Reset to defaults">
+                            ↺
+                        </button>
+                    </div>
+
+                    <div id="errorMsg" class="hidden bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-md text-sm"></div>
+                    <div id="loadingMsg" class="hidden bg-blue-50 border border-blue-200 text-blue-700 px-4 py-3 rounded-md text-sm"></div>
+
+                    <div id="businessSelector" class="hidden border-t pt-4">
+                        <label class="block text-sm font-medium text-gray-700 mb-2" id="businessLabel"></label>
+                        <select id="businessSelect" class="w-full px-3 py-2 border border-gray-300 rounded-md"></select>
+
+                        <div class="mt-4 p-3 bg-gray-50 rounded-md">
+                            <h3 class="font-medium text-gray-900">Ranking Legend</h3>
+                            <div class="mt-2 space-y-1 text-sm">
+                                <div class="flex items-center gap-2">
+                                    <div class="w-4 h-4 rounded-full bg-green-500"></div>
+                                    <span>Rank 1-3</span>
+                                </div>
+                                <div class="flex items-center gap-2">
+                                    <div class="w-4 h-4 rounded-full bg-yellow-500"></div>
+                                    <span>Rank 4-10</span>
+                                </div>
+                                <div class="flex items-center gap-2">
+                                    <div class="w-4 h-4 rounded-full bg-orange-500"></div>
+                                    <span>Rank 11-20</span>
+                                </div>
+                                <div class="flex items-center gap-2">
+                                    <div class="w-4 h-4 rounded-full bg-gray-400"></div>
+                                    <span>Not ranked</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Map -->
+            <div class="flex-1 relative">
+                <div id="map"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ============= CONFIGURATION =============
+        const DEFAULT_CONFIG = {
+            centerLat: 40.7128,
+            centerLon: -74.0060,
+            keyword: 'restaurant',
+            numPoints: 9,
+            distanceKm: 1,
+            apiLogin: '',
+            apiPassword: ''
+        };
+
+        // ============= STATE =============
+        let map;
+        let markers = [];
+        let gridPoints = [];
+        let businesses = [];
+        let rankingData = {};
+        let selectedBusiness = null;
+        let showPreview = true;
+
+        // ============= UTILITY FUNCTIONS =============
+        function getUrlParams() {
+            const params = new URLSearchParams(window.location.search);
+            return {
+                centerLat: params.get('lat') ? parseFloat(params.get('lat')) : null,
+                centerLon: params.get('lon') ? parseFloat(params.get('lon')) : null,
+                keyword: params.get('keyword') || null,
+                numPoints: params.get('num_points') ? parseInt(params.get('num_points')) : null,
+                distanceKm: params.get('distance_km') ? parseFloat(params.get('distance_km')) : null,
+            };
+        }
+
+        function calculateGridDimensions(numPoints) {
+            const sqrt = Math.sqrt(numPoints);
+            const rows = Math.floor(sqrt);
+            const cols = Math.ceil(numPoints / rows);
+            return { rows, cols, total: rows * cols };
+        }
+
+        function calculateOffset(distanceKm) {
+            return distanceKm / 111; // Approximate: 1 degree latitude = 111km
+        }
+
+        function generateGridPoints(centerLat, centerLon, numPoints, distanceKm) {
+            const { rows, cols } = calculateGridDimensions(numPoints);
+            const offset = calculateOffset(distanceKm);
+            const points = [];
+            
+            const startRow = -(rows - 1) / 2;
+            const startCol = -(cols - 1) / 2;
+            
+            let pointCount = 0;
+            for (let i = 0; i < rows && pointCount < numPoints; i++) {
+                for (let j = 0; j < cols && pointCount < numPoints; j++) {
+                    const lat = centerLat + (startRow + i) * offset;
+                    const lon = centerLon + (startCol + j) * offset / Math.cos(centerLat * Math.PI / 180);
+                    points.push({
+                        id: pointCount,
+                        lat: parseFloat(lat.toFixed(6)),
+                        lon: parseFloat(lon.toFixed(6))
+                    });
+                    pointCount++;
+                }
+            }
+            
+            return points;
+        }
+
+        function getRankingColor(position) {
+            if (!position || position > 20) return '#cccccc';
+            if (position <= 3) return '#22c55e';
+            if (position <= 10) return '#eab308';
+            if (position <= 20) return '#f97316';
+            return '#cccccc';
+        }
+
+        function createColoredMarker(lat, lon, color, popupText) {
+            const icon = L.divIcon({
+                className: 'custom-marker',
+                html: `<div style="background-color: ${color}; width: 25px; height: 25px; border-radius: 50%; border: 3px solid white; box-shadow: 0 2px 5px rgba(0,0,0,0.3);"></div>`,
+                iconSize: [25, 25],
+                iconAnchor: [12, 12]
+            });
+            const marker = L.marker([lat, lon], { icon }).addTo(map);
+            if (popupText) marker.bindPopup(popupText);
+            return marker;
+        }
+
+        function clearMarkers() {
+            markers.forEach(m => map.removeLayer(m));
+            markers = [];
+        }
+
+        function updateGridInfo() {
+            const numPoints = parseInt(document.getElementById('numPoints').value);
+            const { rows, cols, total } = calculateGridDimensions(numPoints);
+            document.getElementById('gridInfo').textContent = `Will create ${rows}×${cols} grid (${total} points)`;
+        }
+
+        function updateMap() {
+            const centerLat = parseFloat(document.getElementById('centerLat').value);
+            const centerLon = parseFloat(document.getElementById('centerLon').value);
+            const numPoints = parseInt(document.getElementById('numPoints').value);
+            const distanceKm = parseFloat(document.getElementById('distanceKm').value);
+
+            gridPoints = generateGridPoints(centerLat, centerLon, numPoints, distanceKm);
+            
+            if (showPreview) {
+                clearMarkers();
+                gridPoints.forEach(point => {
+                    const popup = `<strong>Grid Point ${point.id + 1}</strong><br>Lat: ${point.lat}<br>Lon: ${point.lon}`;
+                    markers.push(createColoredMarker(point.lat, point.lon, '#3b82f6', popup));
+                });
+            }
+
+            map.setView([centerLat, centerLon], 12);
+        }
+
+        function showError(message) {
+            const errorMsg = document.getElementById('errorMsg');
+            errorMsg.textContent = message;
+            errorMsg.classList.remove('hidden');
+        }
+
+        function hideError() {
+            document.getElementById('errorMsg').classList.add('hidden');
+        }
+
+        function showLoading(show) {
+            const loadingMsg = document.getElementById('loadingMsg');
+            if (show) {
+                loadingMsg.textContent = `Analyzing ${gridPoints.length} locations... This may take a minute.`;
+                loadingMsg.classList.remove('hidden');
+                document.getElementById('runBtn').disabled = true;
+                document.getElementById('runBtn').classList.add('bg-gray-400', 'cursor-not-allowed');
+                document.getElementById('runBtn').classList.remove('bg-blue-600', 'hover:bg-blue-700');
+            } else {
+                loadingMsg.classList.add('hidden');
+                document.getElementById('runBtn').disabled = false;
+                document.getElementById('runBtn').classList.remove('bg-gray-400', 'cursor-not-allowed');
+                document.getElementById('runBtn').classList.add('bg-blue-600', 'hover:bg-blue-700');
+            }
+        }
+
+        function copyUrl() {
+            const params = new URLSearchParams({
+                lat: document.getElementById('centerLat').value,
+                lon: document.getElementById('centerLon').value,
+                keyword: document.getElementById('keyword').value,
+                num_points: document.getElementById('numPoints').value,
+                distance_km: document.getElementById('distanceKm').value
+            });
+            const url = `${window.location.origin}${window.location.pathname}?${params.toString()}`;
+            navigator.clipboard.writeText(url).then(() => {
+                alert('URL copied to clipboard!');
+            });
+        }
+
+        function resetToDefaults() {
+            document.getElementById('centerLat').value = DEFAULT_CONFIG.centerLat;
+            document.getElementById('centerLon').value = DEFAULT_CONFIG.centerLon;
+            document.getElementById('keyword').value = DEFAULT_CONFIG.keyword;
+            document.getElementById('numPoints').value = DEFAULT_CONFIG.numPoints;
+            document.getElementById('distanceKm').value = DEFAULT_CONFIG.distanceKm;
+            document.getElementById('apiLogin').value = DEFAULT_CONFIG.apiLogin;
+            document.getElementById('apiPassword').value = DEFAULT_CONFIG.apiPassword;
+            window.history.replaceState({}, '', window.location.pathname);
+            updateGridInfo();
+            updateMap();
+        }
+
+        async function runAnalysis() {
+            const apiLogin = document.getElementById('apiLogin').value;
+            const apiPassword = document.getElementById('apiPassword').value;
+
+            if (!apiLogin || !apiPassword) {
+                showError('Please enter DataForSEO API credentials');
+                return;
+            }
+
+            hideError();
+            showLoading(true);
+            showPreview = false;
+
+            try {
+                const allBusinesses = new Map();
+                const rankings = {};
+
+                for (const point of gridPoints) {
+                    const response = await fetch('https://api.dataforseo.com/v3/business_data/google/my_business_info/live', {
+                        method: 'POST',
+                        headers: {
+                            'Authorization': 'Basic ' + btoa(`${apiLogin}:${apiPassword}`),
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify([{
+                            language_code: 'en',
+                            location_coordinate: `${point.lat},${point.lon}`,
+                            keyword: document.getElementById('keyword').value,
+                            depth: 20
+                        }])
+                    });
+
+                    if (!response.ok) {
+                        throw new Error(`API call failed: ${response.statusText}`);
+                    }
+
+                    const data = await response.json();
+                    
+                    if (data.tasks && data.tasks[0] && data.tasks[0].result) {
+                        const items = data.tasks[0].result[0]?.items || [];
+                        
+                        items.forEach((item, index) => {
+                            const bizId = item.place_id || item.cid;
+                            if (!bizId) return;
+                            
+                            if (!allBusinesses.has(bizId)) {
+                                allBusinesses.set(bizId, {
+                                    id: bizId,
+                                    title: item.title,
+                                    address: item.address,
+                                    rating: item.rating?.value,
+                                    reviews: item.rating?.votes_count
+                                });
+                            }
+                            
+                            if (!rankings[bizId]) {
+                                rankings[bizId] = {};
+                            }
+                            rankings[bizId][point.id] = index + 1;
+                        });
+                    }
+                }
+
+                businesses = Array.from(allBusinesses.values());
+                rankingData = rankings;
+                
+                if (businesses.length > 0) {
+                    selectedBusiness = businesses[0].id;
+                    updateBusinessSelector();
+                    updateMapWithRankings();
+                } else {
+                    showError('No businesses found for the specified criteria');
+                }
+                
+            } catch (err) {
+                showError(err.message);
+            } finally {
+                showLoading(false);
+            }
+        }
+
+        function updateBusinessSelector() {
+            const selector = document.getElementById('businessSelector');
+            const select = document.getElementById('businessSelect');
+            const label = document.getElementById('businessLabel');
+            
+            label.textContent = `Select Business (${businesses.length} found)`;
+            select.innerHTML = '';
+            
+            businesses.forEach(biz => {
+                const option = document.createElement('option');
+                option.value = biz.id;
+                option.textContent = `${biz.title}${biz.rating ? ` (${biz.rating}⭐)` : ''}`;
+                select.appendChild(option);
+            });
+            
+            select.value = selectedBusiness;
+            selector.classList.remove('hidden');
+        }
+
+        function updateMapWithRankings() {
+            clearMarkers();
+            
+            gridPoints.forEach(point => {
+                const position = rankingData[selectedBusiness]?.[point.id];
+                const color = getRankingColor(position);
+                const popup = `<strong>Position: ${position || 'Not ranked'}</strong><br>Lat: ${point.lat}<br>Lon: ${point.lon}`;
+                markers.push(createColoredMarker(point.lat, point.lon, color, popup));
+            });
+        }
+
+        // ============= INITIALIZATION =============
+        function init() {
+            // Initialize map
+            map = L.map('map').setView([DEFAULT_CONFIG.centerLat, DEFAULT_CONFIG.centerLon], 12);
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+            }).addTo(map);
+
+            // Load configuration from URL or defaults
+            const urlParams = getUrlParams();
+            document.getElementById('centerLat').value = urlParams.centerLat ?? DEFAULT_CONFIG.centerLat;
+            document.getElementById('centerLon').value = urlParams.centerLon ?? DEFAULT_CONFIG.centerLon;
+            document.getElementById('keyword').value = urlParams.keyword ?? DEFAULT_CONFIG.keyword;
+            document.getElementById('numPoints').value = urlParams.numPoints ?? DEFAULT_CONFIG.numPoints;
+            document.getElementById('distanceKm').value = urlParams.distanceKm ?? DEFAULT_CONFIG.distanceKm;
+            document.getElementById('apiLogin').value = DEFAULT_CONFIG.apiLogin;
+            document.getElementById('apiPassword').value = DEFAULT_CONFIG.apiPassword;
+
+            // Setup event listeners
+            document.getElementById('centerLat').addEventListener('input', updateMap);
+            document.getElementById('centerLon').addEventListener('input', updateMap);
+            document.getElementById('numPoints').addEventListener('input', () => {
+                updateGridInfo();
+                updateMap();
+            });
+            document.getElementById('distanceKm').addEventListener('input', updateMap);
+            document.getElementById('runBtn').addEventListener('click', runAnalysis);
+            document.getElementById('copyUrlBtn').addEventListener('click', copyUrl);
+            document.getElementById('resetBtn').addEventListener('click', resetToDefaults);
+            document.getElementById('businessSelect').addEventListener('change', (e) => {
+                selectedBusiness = e.target.value;
+                updateMapWithRankings();
+            });
+
+            // Initial setup
+            updateGridInfo();
+            updateMap();
+        }
+
+        // Start the app when page loads
+        window.addEventListener('load', init);
+    </script>
+</body>
+</html>
