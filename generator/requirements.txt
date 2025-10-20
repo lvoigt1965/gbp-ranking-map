@@ -1,0 +1,9 @@
+# Python Dependencies for GBP Ranking Map Generator
+
+# Core dependencies
+requests>=2.31.0
+mysql-connector-python>=8.2.0
+python-dotenv>=1.0.0
+
+# Optional: for better command-line experience
+colorama>=0.4.6
